@@ -147,7 +147,11 @@
       const importData = (jsonData) => setData(jsonData);
       const clearData = () => setData({ customers: [], contacts: [], orders: [], timeline: [] });
 
-      return { data, addCustomer, updateCustomer, deleteCustomer, addContact, addOrder, updateOrder, addTimeline, importData, clearData };
+
+      const deleteContact = (id) => setData(prev => ({ ...prev, contacts: prev.contacts.filter(c => c.id !== id) }));
+      const deleteTimeline = (id) => setData(prev => ({ ...prev, timeline: prev.timeline.filter(t => t.id !== id) }));
+      return { data, addCustomer, updateCustomer, deleteCustomer, addContact, deleteContact, addOrder, updateOrder, addTimeline, deleteTimeline, importData, clearData };
+
     };
 
     // ==========================================
@@ -163,9 +167,19 @@
       );
     };
 
-    const AddCustomerModal = ({ isOpen, onClose, onSave, ALL_TAGS }) => {
+    const AddCustomerModal = ({ isOpen, onClose, onSave, ALL_TAGS, editingCustomer }) => {
       const [socialInputs, setSocialInputs] = useState([{ platform: 'WhatsApp', account: '' }]);
       const [selectedTags, setSelectedTags] = useState([]);
+
+      useEffect(() => {
+         if (isOpen && editingCustomer) {
+            setSocialInputs(editingCustomer.socialMedia?.length ? editingCustomer.socialMedia : [{ platform: 'WhatsApp', account: '' }]);
+            setSelectedTags(editingCustomer.tags || []);
+         } else if (isOpen) {
+            setSocialInputs([{ platform: 'WhatsApp', account: '' }]);
+            setSelectedTags([]);
+         }
+      }, [isOpen, editingCustomer]);
 
       if (!isOpen) return null;
 
@@ -183,14 +197,15 @@
         const socialMedia = socialInputs.filter(s => s.account.trim() !== '');
 
         const newCustomer = {
+          ...(editingCustomer || {}), // Keep existing ID, createdAt, stage, etc if editing
           name: formData.get('name'),
           country: formData.get('country'),
           website: formData.get('website') || '',
           socialMedia,
           source: formData.get('source'),
           level: formData.get('level'),
-          stage: '未联系',
-          lastFollowUp: '-',
+          stage: editingCustomer ? editingCustomer.stage : '未联系',
+          lastFollowUp: editingCustomer ? editingCustomer.lastFollowUp : '-',
           nextFollowUp: formData.get('nextFollowUp') || '',
           owner: 'Admin',
           tags: selectedTags
@@ -204,18 +219,18 @@
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-lg text-gray-800">新增客户</h3>
+              <h3 className="font-bold text-lg text-gray-800">{editingCustomer ? '编辑客户资料' : '新增客户'}</h3>
               <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
             <div className="overflow-y-auto flex-1 p-6">
               <form id="addCustomerForm" onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">客户名称 *</label>
-                  <input required name="name" type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: AutoParts GmbH" />
+                  <input required name="name" defaultValue={editingCustomer?.name || ''} type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: AutoParts GmbH" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">企业官网</label>
-                  <input name="website" type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: www.example.com" />
+                  <input name="website" defaultValue={editingCustomer?.website || ''} type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: www.example.com" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">社媒账号</label>
@@ -242,11 +257,11 @@
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">国家/地区</label>
-                    <input name="country" type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                    <input name="country" defaultValue={editingCustomer?.country || ''} type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">客户等级</label>
-                    <select name="level" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
+                    <select name="level" defaultValue={editingCustomer?.level || 'C(普通)'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
                       <option value="A(核心)">A(核心)</option>
                       <option value="B(重点)">B(重点)</option>
                       <option value="C(普通)">C(普通)</option>
@@ -274,7 +289,7 @@
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">客户来源</label>
-                    <select name="source" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
+                    <select name="source" defaultValue={editingCustomer?.source || '官网'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
                       <option value="展会">展会</option>
                       <option value="官网">官网</option>
                       <option value="Alibaba">Alibaba</option>
@@ -284,7 +299,7 @@
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">下次提醒</label>
-                    <input name="nextFollowUp" type="date" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                    <input name="nextFollowUp" defaultValue={editingCustomer?.nextFollowUp || ''} type="date" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                   </div>
                 </div>
               </form>
@@ -494,12 +509,17 @@
     const CustomerListView = ({ data, actions, setSelectedCustomer }) => {
       const [searchQuery, setSearchQuery] = useState('');
       const [viewMode, setViewMode] = useState('list'); // 'list' or 'kanban'
+      const [filterLevel, setFilterLevel] = useState('');
+      const [filterStage, setFilterStage] = useState('');
 
-      const filtered = data.customers.filter(c =>
-        c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.country && c.country.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (c.tags && c.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase())))
-      );
+      const filtered = data.customers.filter(c => {
+        const matchSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            (c.country && c.country.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                            (c.tags && c.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase())));
+        const matchLevel = filterLevel ? c.level === filterLevel : true;
+        const matchStage = filterStage ? c.stage === filterStage : true;
+        return matchSearch && matchLevel && matchStage;
+      });
 
       const renderTags = (tags) => {
          if (!tags || tags.length === 0) return null;
@@ -535,9 +555,19 @@
                       {renderTags(c.tags)}
                     </td>
                     <td className="px-6 py-3 text-sm">{c.country || '-'}</td>
-                    <td className="px-6 py-3 text-sm">{c.level}</td>
-                    <td className="px-6 py-3"><StatusBadge stage={c.stage} /></td>
-                    <td className="px-6 py-3 text-sm">{c.nextFollowUp || '-'}</td>
+                    <td className="px-6 py-3 text-sm" onClick={e => e.stopPropagation()}>
+                      <select value={c.level} onChange={(e) => actions.updateCustomer(c.id, { level: e.target.value })} className="bg-transparent hover:bg-gray-100 rounded px-1 py-0.5 cursor-pointer focus:outline-none">
+                        <option value="A(核心)">A(核心)</option><option value="B(重点)">B(重点)</option><option value="C(普通)">C(普通)</option><option value="D(潜在)">D(潜在)</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-3" onClick={e => e.stopPropagation()}>
+                      <select value={c.stage} onChange={(e) => actions.updateCustomer(c.id, { stage: e.target.value })} className="bg-transparent hover:bg-gray-100 rounded px-1 py-0.5 cursor-pointer focus:outline-none text-xs font-medium">
+                        <option value="未联系">未联系</option><option value="初步沟通">初步沟通</option><option value="已报价">已报价</option><option value="样品阶段">样品阶段</option><option value="已成交">已成交</option><option value="已流失">已流失</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-3 text-sm" onClick={e => e.stopPropagation()}>
+                      <input type="date" value={c.nextFollowUp || ''} onChange={(e) => actions.updateCustomer(c.id, { nextFollowUp: e.target.value })} className="bg-transparent hover:bg-gray-100 rounded px-1 py-0.5 cursor-pointer focus:outline-none text-xs" />
+                    </td>
                     <td className="px-6 py-3 text-right">
                       <button onClick={(e) => { e.stopPropagation(); actions.deleteCustomer(c.id); }} className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"><X className="w-4 h-4" /></button>
                     </td>
@@ -585,6 +615,14 @@
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-2xl font-bold text-gray-800">我的客户</h1>
             <div className="flex gap-3">
+              <div className="flex gap-2">
+                <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="border rounded-lg text-sm px-2 py-2 bg-white text-gray-600 outline-none">
+                  <option value="">全部等级</option><option value="A(核心)">A(核心)</option><option value="B(重点)">B(重点)</option><option value="C(普通)">C(普通)</option><option value="D(潜在)">D(潜在)</option>
+                </select>
+                <select value={filterStage} onChange={e => setFilterStage(e.target.value)} className="border rounded-lg text-sm px-2 py-2 bg-white text-gray-600 outline-none">
+                  <option value="">全部阶段</option><option value="未联系">未联系</option><option value="初步沟通">初步沟通</option><option value="已报价">已报价</option><option value="样品阶段">样品阶段</option><option value="已成交">已成交</option><option value="已流失">已流失</option>
+                </select>
+              </div>
               <div className="flex bg-white border rounded-lg p-1">
                  <button onClick={() => setViewMode('list')} className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}><List className="w-4 h-4"/></button>
                  <button onClick={() => setViewMode('kanban')} className={`p-1.5 rounded ${viewMode === 'kanban' ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}><Trello className="w-4 h-4"/></button>
@@ -646,6 +684,8 @@
         e.preventDefault();
         const formData = new FormData(e.target);
         if(!formData.get('content').trim()) return;
+        // Update local selected customer ref to trigger re-renders
+        setSelectedCustomer(prev => prev && prev.id === customer.id ? { ...prev, lastFollowUp: getTodayStr(), nextFollowUp: formData.get('nextFollowUp') || prev.nextFollowUp, stage: formData.get('stage') || prev.stage } : prev);
         actions.addTimeline({
           customerId: customer.id,
           type: formData.get('type'),
@@ -681,8 +721,11 @@
           </div>
           <div className="flex-1 overflow-auto p-6"><div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="space-y-6">
-              <div className="bg-white rounded-xl border p-5 shadow-sm">
-                <h3 className="font-bold mb-4">基础信息</h3>
+              <div className="bg-white rounded-xl border p-5 shadow-sm relative group">
+                <h3 className="font-bold mb-4 flex justify-between items-center">
+                   基础信息
+                   <button onClick={() => actions.openEditCustomer(customer)} className="text-blue-600 hover:bg-blue-50 p-1 rounded text-xs flex items-center gap-1 font-normal opacity-0 group-hover:opacity-100 transition-opacity">编辑资料</button>
+                </h3>
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between text-gray-500"><span>官网</span><span className="text-blue-600">{customer.website || '-'}</span></div>
                   <div className="flex justify-between text-gray-500"><span>来源</span><span className="text-gray-800">{customer.source}</span></div>
@@ -701,7 +744,7 @@
                 <div className="space-y-3">
                   {cContacts.map(c => (
                     <div key={c.id} className="p-3 bg-gray-50 rounded border text-sm">
-                      <div className="font-bold mb-1">{c.name} {c.isPrimary && <span className="text-[10px] bg-green-100 text-green-700 px-1 rounded">首要</span>}</div>
+                      <div className="flex justify-between items-start"><div className="font-bold mb-1">{c.name} {c.isPrimary && <span className="text-[10px] bg-green-100 text-green-700 px-1 rounded">首要</span>}</div><button onClick={() => { if(window.confirm('确定删除联系人?')) actions.deleteContact(c.id); }} className="text-gray-400 hover:text-red-600 p-0.5"><X className="w-3.5 h-3.5"/></button></div>
                       <div className="text-xs text-gray-500">{c.title}</div>
                       <div className="text-xs mt-1 text-gray-600">{c.email} {c.phone}</div>
                     </div>
@@ -717,7 +760,7 @@
                     <div className="flex gap-2">
                       <select name="type" className="text-sm border rounded px-2 py-1"><option value="whatsapp">WhatsApp</option><option value="mail">邮件</option><option value="meeting">面谈</option></select>
                       <select name="stage" defaultValue={customer.stage} className="text-sm border rounded px-2 py-1"><option value="初步沟通">初步沟通</option><option value="已报价">已报价</option><option value="已成交">已成交</option></select>
-                      <input name="nextFollowUp" type="date" defaultValue={customer.nextFollowUp||''} className="text-sm border rounded px-2 py-1" />
+                      <input name="nextFollowUp" defaultValue={editingCustomer?.nextFollowUp || ''} type="date" defaultValue={customer.nextFollowUp||''} className="text-sm border rounded px-2 py-1" />
                     </div>
                     <button type="submit" className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm font-bold">发布跟进</button>
                   </div>
@@ -730,7 +773,7 @@
                     <div key={t.id} className="relative">
                       <div className="absolute w-3 h-3 bg-blue-500 rounded-full -left-[23px] top-1"></div>
                       <div className="bg-gray-50 p-3 rounded border text-sm">
-                        <div className="flex justify-between text-xs text-gray-400 mb-1"><span>{t.type}</span><span>{new Date(t.date).toLocaleString()}</span></div>
+                        <div className="flex justify-between text-xs text-gray-400 mb-1"><span>{t.type}</span><div className="flex items-center gap-2"><span>{new Date(t.date).toLocaleString()}</span><button onClick={() => { if(window.confirm('确定删除该记录?')) actions.deleteTimeline(t.id); }} className="hover:text-red-600"><X className="w-3 h-3"/></button></div></div>
                         <p className="text-gray-800 whitespace-pre-wrap">{t.content}</p>
                       </div>
                     </div>
@@ -922,15 +965,26 @@
         setTimeout(() => setToast(null), 3000);
       };
 
-      const actions = { ...dataActions, showToast, openAddCustomer: () => setAddCustOpen(true) };
+
+      const [editingCustomer, setEditingCustomer] = useState(null);
+      const actions = {
+        ...dataActions,
+        showToast,
+        openAddCustomer: () => { setEditingCustomer(null); setAddCustOpen(true); },
+        openEditCustomer: (c) => { setEditingCustomer(c); setAddCustOpen(true); }
+      };
 
       return (
         <div className="flex h-screen bg-gray-50">
           <Toast toast={toast} />
 
           <AddCustomerModal
-             isOpen={isAddCustOpen} onClose={() => setAddCustOpen(false)} ALL_TAGS={ALL_TAGS}
-             onSave={(c) => { actions.addCustomer(c); setAddCustOpen(false); showToast("客户录入成功"); }}
+             isOpen={isAddCustOpen} onClose={() => setAddCustOpen(false)} ALL_TAGS={ALL_TAGS} editingCustomer={editingCustomer}
+             onSave={(c) => {
+             if (c.id) { actions.updateCustomer(c.id, c); showToast("客户资料已更新"); }
+             else { actions.addCustomer(c); showToast("客户录入成功"); }
+             setAddCustOpen(false);
+          }}
           />
           <AddContactModal
              isOpen={!!contactModalArgs} onClose={() => setContactModalArgs(null)} customerId={contactModalArgs}
@@ -971,7 +1025,11 @@
               <div className="flex items-center gap-3"><div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-sm">A</div><span className="text-sm font-bold">Admin</span></div>
             </header>
             <main className="flex-1 overflow-hidden relative">
-              {selectedCustomer ? <CustomerDetailView customer={selectedCustomer} data={data} actions={actions} onBack={()=>setSelectedCustomer(null)} openAddQuote={(q, c) => setQuoteModalArgs({quote:q, customer:c})} openAddContact={id => setContactModalArgs(id)} />
+              {selectedCustomer ? <CustomerDetailView
+                customer={data.customers.find(c => c.id === selectedCustomer.id) || selectedCustomer}
+                data={data}
+                actions={{...actions, updateCustomer: (id, updates) => { actions.updateCustomer(id, updates); setSelectedCustomer(prev => prev.id === id ? {...prev, ...updates} : prev); }}}
+                onBack={()=>setSelectedCustomer(null)} openAddQuote={(q, c) => setQuoteModalArgs({quote:q, customer:c})} openAddContact={id => setContactModalArgs(id)} />
                : activeMenu === 'dashboard' ? <DashboardView data={data} actions={actions} setActiveMenu={setActiveMenu} setSelectedCustomer={setSelectedCustomer} />
                : activeMenu === 'customers' ? <CustomerListView data={data} actions={actions} setSelectedCustomer={setSelectedCustomer} />
                : activeMenu === 'quotes' ? <QuotesOrdersView data={data} setSelectedCustomer={setSelectedCustomer} openAddQuote={q => setQuoteModalArgs({quote:q})} />
