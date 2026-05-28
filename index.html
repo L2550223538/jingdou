@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GlobalTradeCRM</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Babel Standalone CDN for compiling JSX in browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Import Maps for ES Modules -->
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js",
+        "lucide-react": "https://esm.sh/lucide-react@0.330.0"
+      }
+    }
+  </script>
+
+  <!-- Global Firebase Configurations -->
+  <script>
+    // Placeholder for user to fill in their own Firebase configuration
+    window.__firebase_config = JSON.stringify({
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    });
+    window.__app_id = 'global-trade-crm-demo';
+    // If you have a custom token for auth, you can put it here:
+    // window.__initial_auth_token = 'YOUR_CUSTOM_TOKEN';
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React Application Code -->
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { initializeApp } from 'firebase/app';
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+    import { getFirestore, collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+    import {
+      LayoutDashboard, Users, Globe, Briefcase, Calendar, BarChart2, Settings,
+      Search, Bell, Plus, MessageCircle, Mail, Phone, ChevronLeft, MoreVertical,
+      CheckCircle2, AlertCircle, Clock, X, Check, Save
+    } from 'lucide-react';
+
+    // Initialize Firebase
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'global-trade-crm-demo';
+
+    function GlobalTradeCRM() {
+      // Global State
+      const [user, setUser] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [toast, setToast] = useState(null);
+
+      // App Data State
+      const [customers, setCustomers] = useState([]);
+      const [timeline, setTimeline] = useState([]);
+      const [contacts, setContacts] = useState([]);
+      const [orders, setOrders] = useState([]);
+
+      // UI State
+      const [activeMenu, setActiveMenu] = useState('dashboard');
+      const [selectedCustomer, setSelectedCustomer] = useState(null);
+      const [isAddCustomerModalOpen, setIsAddCustomerModalOpen] = useState(false);
+      const [isAddContactModalOpen, setIsAddContactModalOpen] = useState(false);
+      const [isAddQuoteModalOpen, setIsAddQuoteModalOpen] = useState(false);
+      const [editingQuote, setEditingQuote] = useState(null);
+      const [searchQuery, setSearchQuery] = useState('');
+
+      // 新增：社媒动态表单状态
+      const [socialInputs, setSocialInputs] = useState([{ platform: 'WhatsApp', account: '' }]);
+
+      const handleAddSocial = () => {
+        setSocialInputs([...socialInputs, { platform: 'WhatsApp', account: '' }]);
+      };
+
+      const handleRemoveSocial = (index) => {
+        setSocialInputs(socialInputs.filter((_, i) => i !== index));
+      };
+
+      const handleSocialChange = (index, field, value) => {
+        const newSocials = [...socialInputs];
+        newSocials[index][field] = value;
+        setSocialInputs(newSocials);
+      };
+
+      // 修复：补回系统身份认证与初始化逻辑
+      useEffect(() => {
+        const initAuth = async () => {
+          try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+              await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+              await signInAnonymously(auth);
+            }
+          } catch (error) {
+            console.error("Authentication failed:", error);
+          }
+        };
+        initAuth();
+
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+          setUser(currentUser);
+          // 如果没有获取到用户，也关闭 loading 防止死循环转圈
+          if (!currentUser) setLoading(false);
+        });
+        return () => unsubscribe();
+      }, []);
+
+      useEffect(() => {
+        if (!user) return;
+
+        // Strict Paths for Private Data
+        const customersRef = collection(db, 'artifacts', appId, 'users', user.uid, 'customers');
+        const timelineRef = collection(db, 'artifacts', appId, 'users', user.uid, 'timeline');
+        const contactsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'contacts');
+        const ordersRef = collection(db, 'artifacts', appId, 'users', user.uid, 'orders');
+
+        setLoading(true);
+
+        const unsubCustomers = onSnapshot(customersRef, (snapshot) => {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          // Sort by creation time descending in memory
+          data.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+          setCustomers(data);
+
+          // Update selected customer if it was modified
+          if (selectedCustomer) {
+            const updatedSelected = data.find(c => c.id === selectedCustomer.id);
+            if (updatedSelected) setSelectedCustomer(updatedSelected);
+          }
+          setLoading(false);
+        }, (error) => {
+          console.error("Customers Fetch Error:", error);
+          showToast("数据加载失败", "error");
+        });
+
+        const unsubTimeline = onSnapshot(timelineRef, (snapshot) => {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          // Sort by date descending
+          data.sort((a, b) => new Date(b.date) - new Date(a.date));
+          setTimeline(data);
+        }, (error) => {
+          console.error("Timeline Fetch Error:", error);
+        });
+
+        const unsubContacts = onSnapshot(contactsRef, (snapshot) => {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setContacts(data);
+        }, (error) => console.error("Contacts Fetch Error:", error));
+
+        const unsubOrders = onSnapshot(ordersRef, (snapshot) => {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          data.sort((a, b) => new Date(b.date) - new Date(a.date));
+          setOrders(data);
+        }, (error) => console.error("Orders Fetch Error:", error));
+
+        return () => {
+          unsubCustomers();
+          unsubTimeline();
+          unsubContacts();
+          unsubOrders();
+        };
+      }, [user]);
+
+      const showToast = (message, type = 'success') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 3000);
+      };
+
+      const getTodayStr = () => {
+        const tzOffset = (new Date()).getTimezoneOffset() * 60000;
+        return (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
+      };
+
+      // Derived Stats
+      const todayStr = getTodayStr();
+      const currentMonthStr = todayStr.substring(0, 7);
+
+      const stats = {
+        todayTasks: customers.filter(c => c.nextFollowUp === todayStr && c.stage !== '已成交').length,
+        overdue: customers.filter(c => c.nextFollowUp && c.nextFollowUp < todayStr && c.stage !== '已成交' && c.stage !== '已流失').length,
+        newLeads: customers.filter(c => {
+          if (!c.createdAt) return false;
+          const dateStr = c.createdAt.toDate ? c.createdAt.toDate().toISOString() : new Date(c.createdAt).toISOString();
+          return dateStr.startsWith(currentMonthStr);
+        }).length,
+        thisMonthOrders: 0 // MVP Mock
+      };
+
+      const isOverdue = (nextFollowUp, stage) => {
+        if (!nextFollowUp || stage === '已成交' || stage === '已流失') return false;
+        return nextFollowUp < todayStr;
+      };
+
+      const handleAddCustomer = async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+
+        // 过滤掉未填写账号的社媒空项
+        const socialMedia = socialInputs.filter(s => s.account.trim() !== '');
+
+        const newCustomer = {
+          name: formData.get('name'),
+          country: formData.get('country'),
+          website: formData.get('website') || '',
+          socialMedia, // 存入结构化数组
+          source: formData.get('source'),
+          level: formData.get('level'),
+          stage: '未联系',
+          lastFollowUp: '-',
+          nextFollowUp: formData.get('nextFollowUp') || '',
+          owner: 'Admin',
+          createdAt: serverTimestamp(),
+        };
+
+        try {
+          const customersRef = collection(db, 'artifacts', appId, 'users', user.uid, 'customers');
+          await addDoc(customersRef, newCustomer);
+          setIsAddCustomerModalOpen(false);
+          showToast("客户录入成功");
+        } catch (error) {
+          console.error(error);
+          showToast("录入失败", "error");
+        }
+      };
+
+      const handleAddContact = async (e) => {
+        e.preventDefault();
+        if (!selectedCustomer) return;
+        const formData = new FormData(e.target);
+        try {
+          await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'contacts'), {
+            customerId: selectedCustomer.id,
+            name: formData.get('name'),
+            title: formData.get('title'),
+            email: formData.get('email'),
+            phone: formData.get('phone'),
+            isPrimary: formData.get('isPrimary') === 'on',
+            createdAt: serverTimestamp()
+          });
+          setIsAddContactModalOpen(false);
+          showToast("联系人添加成功");
+        } catch (error) {
+          console.error(error);
+          showToast("联系人添加失败", "error");
+        }
+      };
+
+      const handleSaveQuote = async (e) => {
+        e.preventDefault();
+        if (!selectedCustomer && !editingQuote) return;
+        const formData = new FormData(e.target);
+        const type = formData.get('type');
+        const amount = formData.get('amount');
+        const date = formData.get('date');
+        const status = formData.get('status');
+        const product = formData.get('product');
+
+        const customerId = editingQuote ? editingQuote.customerId : selectedCustomer.id;
+        const customerName = editingQuote ? editingQuote.customerName : selectedCustomer.name;
+
+        try {
+          if (editingQuote) {
+            const quoteRef = doc(db, 'artifacts', appId, 'users', user.uid, 'orders', editingQuote.id);
+            await updateDoc(quoteRef, { type, amount, date, status, product });
+
+            // 同步修改记录到跟进时间轴
+            await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'timeline'), {
+              customerId,
+              type: 'system',
+              date: new Date().toISOString(),
+              title: `更新${type}状态: ${editingQuote.displayId}`,
+              content: `状态变更为: ${status}\n总金额: ${amount}\n关联产品: ${product || '未填写'}`,
+              user: 'Admin (系统记录)'
+            });
+
+            showToast("单据修改成功，动态已同步更新");
+          } else {
+            const prefix = type === '报价单' ? 'QUO' : type === '订单' ? 'ORD' : 'SMP';
+            const displayId = `${prefix}-${Date.now().toString().slice(-6)}`;
+
+            await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'orders'), {
+              customerId,
+              customerName,
+              displayId,
+              type,
+              amount,
+              date,
+              status,
+              product,
+              color: type === '报价单' ? 'bg-yellow-100 text-yellow-700' : type === '订单' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700',
+              createdAt: serverTimestamp()
+            });
+
+            // Sync to Timeline
+            await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'timeline'), {
+              customerId,
+              type: 'system',
+              date: new Date().toISOString(),
+              title: `录入${type}: ${displayId}`,
+              content: `关联产品: ${product || '未填写'}\n总金额: ${amount}\n当前状态: ${status}`,
+              user: 'Admin (系统记录)'
+            });
+
+            // 更新客户阶段
+            const customerRef = doc(db, 'artifacts', appId, 'users', user.uid, 'customers', customerId);
+            let newStage = type === '报价单' ? '已报价' : type === '订单' ? '已成交' : '样品阶段';
+            await updateDoc(customerRef, { stage: newStage });
+
+            showToast("单据添加成功，已同步至跟进动态");
+          }
+          setIsAddQuoteModalOpen(false);
+          setEditingQuote(null);
+        } catch (error) {
+          console.error(error);
+          showToast(editingQuote ? "修改失败" : "添加失败", "error");
+        }
+      };
+
+      const handleAddTimeline = async (e, customerId) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const content = formData.get('content');
+        if (!content.trim()) return;
+
+        const type = formData.get('type');
+        const nextFollowUp = formData.get('nextFollowUp');
+        const stage = formData.get('stage');
+
+        const newTimeline = {
+          customerId,
+          type,
+          date: new Date().toISOString(),
+          title: `${type === 'whatsapp' ? 'WhatsApp 沟通' : type === 'mail' ? '邮件沟通' : '电话沟通'}`,
+          content,
+          user: 'Admin'
+        };
+
+        try {
+          // Add timeline
+          const timelineRef = collection(db, 'artifacts', appId, 'users', user.uid, 'timeline');
+          await addDoc(timelineRef, newTimeline);
+
+          // Update customer
+          const customerRef = doc(db, 'artifacts', appId, 'users', user.uid, 'customers', customerId);
+          const updates = { lastFollowUp: todayStr };
+          if (nextFollowUp) updates.nextFollowUp = nextFollowUp;
+          if (stage) updates.stage = stage;
+
+          await updateDoc(customerRef, updates);
+
+          e.target.reset();
+          showToast("跟进记录已发布");
+        } catch (error) {
+          console.error(error);
+          showToast("发布失败", "error");
+        }
+      };
+
+      const handleDeleteCustomer = async (id, e) => {
+        e.stopPropagation();
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'customers', id));
+          if (selectedCustomer?.id === id) setSelectedCustomer(null);
+          showToast("客户已删除");
+        } catch (error) {
+          console.error(error);
+          showToast("删除失败", "error");
+        }
+      };
+
+      const SidebarItem = ({ icon: Icon, label, id, badge }) => (
+        <div
+          onClick={() => { setActiveMenu(id); setSelectedCustomer(null); }}
+          className={`flex items-center px-4 py-3 cursor-pointer rounded-lg mb-1 transition-colors ${
+            activeMenu === id && !selectedCustomer ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          <Icon className="w-5 h-5 mr-3" />
+          <span className="flex-1 font-medium text-sm">{label}</span>
+          {badge && (
+            <span className="bg-red-100 text-red-600 px-2 py-0.5 rounded-full text-xs font-bold">
+              {badge}
+            </span>
+          )}
+        </div>
+      );
+
+      const StatusBadge = ({ stage }) => {
+        const colors = {
+          '未联系': 'bg-gray-100 text-gray-600',
+          '初步沟通': 'bg-blue-100 text-blue-600',
+          '已报价': 'bg-yellow-100 text-yellow-700',
+          '样品阶段': 'bg-purple-100 text-purple-600',
+          '已成交': 'bg-green-100 text-green-600',
+          '已流失': 'bg-red-100 text-red-600',
+        };
+        return (
+          <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${colors[stage] || 'bg-gray-100 text-gray-600'}`}>
+            {stage}
+          </span>
+        );
+      };
+
+      const Toast = () => {
+        if (!toast) return null;
+        return (
+          <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 transform transition-all duration-300 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-gray-800 text-white'}`}>
+            {toast.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+            <span className="font-medium text-sm">{toast.message}</span>
+          </div>
+        );
+      };
+
+      const AddCustomerModal = () => {
+        if (!isAddCustomerModalOpen) return null;
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+                <h3 className="font-bold text-lg text-gray-800">新增客户</h3>
+                <button onClick={() => setIsAddCustomerModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleAddCustomer} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">客户名称 *</label>
+                  <input required name="name" type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: AutoParts GmbH" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">企业官网</label>
+                  <input name="website" type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: www.example.com" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">社媒账号</label>
+                  <div className="space-y-2">
+                    {socialInputs.map((social, index) => (
+                      <div key={index} className="flex gap-2">
+                        <select
+                          value={social.platform}
+                          onChange={(e) => handleSocialChange(index, 'platform', e.target.value)}
+                          className="w-1/3 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                        >
+                          <option value="WhatsApp">WhatsApp</option>
+                          <option value="WeChat">WeChat</option>
+                          <option value="LinkedIn">LinkedIn</option>
+                          <option value="Skype">Skype</option>
+                          <option value="Facebook">Facebook</option>
+                          <option value="其他">其他</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={social.account}
+                          onChange={(e) => handleSocialChange(index, 'account', e.target.value)}
+                          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          placeholder="输入账号/手机号/主页链接"
+                        />
+                        {socialInputs.length > 1 && (
+                          <button type="button" onClick={() => handleRemoveSocial(index)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button type="button" onClick={handleAddSocial} className="text-sm text-blue-600 font-medium flex items-center gap-1 hover:text-blue-700 mt-1">
+                      <Plus className="w-3.5 h-3.5" /> 添加更多社媒
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 pt-2">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">国家/地区</label>
+                    <input name="country" type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: Germany" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">客户等级</label>
+                    <select name="level" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
+                      <option value="A(核心)">A(核心)</option>
+                      <option value="B(重点)">B(重点)</option>
+                      <option value="C(普通)">C(普通)</option>
+                      <option value="D(潜在)">D(潜在)</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">客户来源</label>
+                    <select name="source" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
+                      <option value="展会">展会</option>
+                      <option value="官网">官网</option>
+                      <option value="Alibaba">Alibaba</option>
+                      <option value="LinkedIn">LinkedIn</option>
+                      <option value="Google开发">Google开发</option>
+                      <option value="其他">其他</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">下次提醒</label>
+                    <input name="nextFollowUp" type="date" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                  </div>
+                </div>
+                <div className="pt-4 flex gap-3 justify-end">
+                  <button type="button" onClick={() => setIsAddCustomerModalOpen(false)} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">取消</button>
+                  <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
+                    <Save className="w-4 h-4" /> 保存客户
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      };
+
+      const AddContactModal = () => {
+        if (!isAddContactModalOpen) return null;
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+                <h3 className="font-bold text-lg text-gray-800">新增联系人</h3>
+                <button onClick={() => setIsAddContactModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleAddContact} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">姓名 *</label>
+                  <input required name="name" type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: John Doe" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">职位</label>
+                  <input name="title" type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: 采购经理" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">邮箱</label>
+                    <input name="email" type="email" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">电话/WhatsApp</label>
+                    <input name="phone" type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                  </div>
+                </div>
+                <div className="pt-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                    <input name="isPrimary" type="checkbox" className="rounded text-blue-600 focus:ring-blue-500" defaultChecked />
+                    设为首要联系人
+                  </label>
+                </div>
+                <div className="pt-4 flex gap-3 justify-end">
+                  <button type="button" onClick={() => setIsAddContactModalOpen(false)} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">取消</button>
+                  <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
+                    <Save className="w-4 h-4" /> 保存联系人
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      };
+
+      const AddQuoteModal = () => {
+        if (!isAddQuoteModalOpen) return null;
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+                <h3 className="font-bold text-lg text-gray-800">{editingQuote ? '编辑报价/订单' : '录入报价/订单'}</h3>
+                <button onClick={() => { setIsAddQuoteModalOpen(false); setEditingQuote(null); }} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleSaveQuote} className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">单据类型</label>
+                    <select name="type" defaultValue={editingQuote?.type || '报价单'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
+                      <option>报价单</option><option>样品单</option><option>订单</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">当前状态</label>
+                    <select name="status" defaultValue={editingQuote?.status || '待客户确认'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
+                      <option>待客户确认</option><option>已确认</option><option>生产中</option><option>已发货</option><option>已完结</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">关联产品 / 备注</label>
+                  <input name="product" defaultValue={editingQuote?.product || ''} type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: A型零部件 1000pcs" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">总金额 (USD)</label>
+                  <input required name="amount" defaultValue={editingQuote?.amount || ''} type="text" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="如: $12,500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">单据日期</label>
+                  <input required name="date" type="date" defaultValue={editingQuote?.date || todayStr} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                </div>
+                <div className="pt-4 flex gap-3 justify-end">
+                  <button type="button" onClick={() => { setIsAddQuoteModalOpen(false); setEditingQuote(null); }} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">取消</button>
+                  <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
+                    <Save className="w-4 h-4" /> {editingQuote ? '保存修改' : '保存单据'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      };
+
+      const DashboardView = () => (
+        <div className="p-6 max-w-7xl mx-auto">
+          <h1 className="text-2xl font-bold text-gray-800 mb-6">工作台</h1>
+
+          {/* KPI Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            {[
+              { label: '今日待联系', value: stats.todayTasks, color: 'text-blue-600', bg: 'bg-blue-50', icon: Clock },
+              { label: '逾期未跟进 (风险)', value: stats.overdue, color: 'text-red-600', bg: 'bg-red-50', icon: AlertCircle },
+              { label: '本月新增线索', value: stats.newLeads, color: 'text-green-600', bg: 'bg-green-50', icon: Users },
+              { label: '本月成交 (USD)', value: `$${stats.thisMonthOrders.toLocaleString()}`, color: 'text-purple-600', bg: 'bg-purple-50', icon: CheckCircle2 },
+            ].map((stat, idx) => (
+              <div key={idx} className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500 mb-1">{stat.label}</p>
+                  <h3 className={`text-3xl font-bold ${stat.color}`}>{stat.value}</h3>
+                </div>
+                <div className={`p-3 rounded-lg ${stat.bg}`}>
+                  <stat.icon className={`w-6 h-6 ${stat.color}`} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Task List */}
+            <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col max-h-[500px]">
+              <div className="p-5 border-b border-gray-100 flex justify-between items-center shrink-0">
+                <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-orange-500" /> 跟进提醒 (今日与逾期)
+                </h3>
+                <button onClick={() => setActiveMenu('customers')} className="text-blue-600 text-sm hover:underline font-medium">查看全部客户</button>
+              </div>
+              <div className="divide-y divide-gray-100 overflow-y-auto flex-1">
+                {customers.filter(c => c.nextFollowUp === todayStr || isOverdue(c.nextFollowUp, c.stage)).length === 0 ? (
+                  <div className="p-8 text-center text-gray-500 text-sm">暂无待办任务，干得漂亮！🎉</div>
+                ) : (
+                  customers.filter(c => c.nextFollowUp === todayStr || isOverdue(c.nextFollowUp, c.stage)).slice(0, 10).map(c => {
+                    const overdue = isOverdue(c.nextFollowUp, c.stage);
+                    return (
+                      <div key={c.id} className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => setSelectedCustomer(c)}>
+                        <div className="flex items-center gap-4">
+                          <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${overdue ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                          <div>
+                            <p className="text-sm font-bold text-gray-800">{c.name} <span className="text-gray-400 font-normal text-xs ml-2">({c.country || '未知国家'})</span></p>
+                            <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">
+                              <StatusBadge stage={c.stage} />
+                              <span>上次跟进: {c.lastFollowUp}</span>
+                            </p>
+                          </div>
+                        </div>
+                        {overdue ? (
+                          <span className="text-xs font-medium text-red-600 bg-red-50 px-2.5 py-1 rounded-full border border-red-100">逾期流失风险</span>
+                        ) : (
+                          <button className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">去跟进</button>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 h-fit">
+              <h3 className="font-bold text-gray-800 mb-4">快捷操作</h3>
+              <div className="space-y-3">
+                <button onClick={() => { setSocialInputs([{ platform: 'WhatsApp', account: '' }]); setIsAddCustomerModalOpen(true); }} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm transition-colors text-sm font-bold">
+                  <Plus className="w-4 h-4" /> 录入新客户
+                </button>
+                <button onClick={() => setActiveMenu('customers')} className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium">
+                  <Search className="w-4 h-4" /> 查找客户
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
+      const CustomerListView = () => {
+        const filteredCustomers = customers.filter(c =>
+          c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (c.country && c.country.toLowerCase().includes(searchQuery.toLowerCase()))
+        );
+
+        return (
+          <div className="p-6 h-full flex flex-col max-w-7xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h1 className="text-2xl font-bold text-gray-800">我的客户</h1>
+              <div className="flex gap-3">
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="搜索客户名/国家..."
+                    className="pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64 shadow-sm"
+                  />
+                </div>
+                <button onClick={() => { setSocialInputs([{ platform: 'WhatsApp', account: '' }]); setIsAddCustomerModalOpen(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm text-sm font-bold transition-colors">
+                  <Plus className="w-4 h-4" /> 新建客户
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm flex-1 overflow-hidden flex flex-col">
+              <div className="overflow-x-auto flex-1">
+                <table className="w-full text-left border-collapse min-w-[800px]">
+                  <thead>
+                    <tr className="bg-gray-50/80 border-b border-gray-200">
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">客户名称</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">国家</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">等级</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">销售阶段</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">状态预警</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">下次提醒</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredCustomers.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" className="px-6 py-12 text-center text-gray-500 text-sm">
+                          没有找到匹配的客户记录
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCustomers.map((c) => {
+                        const overdue = isOverdue(c.nextFollowUp, c.stage);
+                        return (
+                          <tr key={c.id} className="hover:bg-blue-50/50 cursor-pointer transition-colors group" onClick={() => setSelectedCustomer(c)}>
+                            <td className="px-6 py-4">
+                              <div className="font-bold text-blue-600 group-hover:text-blue-700">{c.name}</div>
+                              <div className="text-xs text-gray-400 mt-1">{c.source}</div>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-700 font-medium">{c.country || '-'}</td>
+                            <td className="px-6 py-4 text-sm text-gray-700">{c.level}</td>
+                            <td className="px-6 py-4">
+                              <StatusBadge stage={c.stage} />
+                            </td>
+                            <td className="px-6 py-4 text-sm">
+                              {overdue ? (
+                                <span className="text-red-600 font-bold flex items-center gap-1.5"><AlertCircle className="w-3.5 h-3.5"/> 逾期未跟</span>
+                              ) : c.nextFollowUp === todayStr && c.stage !== '已成交' ? (
+                                <span className="text-blue-600 font-bold flex items-center gap-1.5"><Clock className="w-3.5 h-3.5"/> 今日待跟</span>
+                              ) : (
+                                <span className="text-green-600 flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5"/> 正常</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-700 font-medium">{c.nextFollowUp || '-'}</td>
+                            <td className="px-6 py-4 text-right">
+                              <button onClick={(e) => handleDeleteCustomer(c.id, e)} className="text-gray-400 hover:text-red-600 transition-colors p-1 rounded hover:bg-red-50">
+                                <X className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="p-4 border-t border-gray-200 flex justify-between items-center text-sm text-gray-500 bg-gray-50/50">
+                <span>共 {filteredCustomers.length} 条记录</span>
+                <div className="flex gap-2">
+                  <button className="px-3 py-1.5 border border-gray-200 rounded-md hover:bg-white bg-gray-50 disabled:opacity-50 transition-colors">上一页</button>
+                  <button className="px-3 py-1.5 border border-gray-200 rounded-md bg-white font-medium shadow-sm">1</button>
+                  <button className="px-3 py-1.5 border border-gray-200 rounded-md hover:bg-white bg-gray-50 transition-colors">下一页</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const QuotesOrdersView = () => {
+        return (
+          <div className="p-6 h-full flex flex-col max-w-7xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h1 className="text-2xl font-bold text-gray-800">报价与订单</h1>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm flex-1 overflow-hidden flex flex-col">
+              <div className="overflow-x-auto flex-1">
+                <table className="w-full text-left border-collapse min-w-[800px]">
+                  <thead>
+                    <tr className="bg-gray-50/80 border-b border-gray-200">
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">单据编号</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">类型</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">关联客户</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">产品/备注</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">总金额</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">日期</th>
+                      <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">当前状态</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {orders.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" className="px-6 py-12 text-center text-gray-500 text-sm">
+                          暂无单据，请前往客户详情页录入
+                        </td>
+                      </tr>
+                    ) : orders.map((order) => (
+                      <tr key={order.id} className="hover:bg-blue-50/50 cursor-pointer transition-colors" onClick={() => { setEditingQuote(order); setIsAddQuoteModalOpen(true); }}>
+                        <td className="px-6 py-4 font-bold text-gray-800">{order.displayId}</td>
+                        <td className="px-6 py-4 text-sm font-medium text-gray-600">{order.type}</td>
+                        <td className="px-6 py-4 text-sm text-blue-600 font-bold hover:underline" onClick={(e) => {
+                          e.stopPropagation();
+                          const c = customers.find(x => x.id === order.customerId);
+                          if(c) {
+                            setSelectedCustomer(c);
+                            setActiveMenu('customers');
+                          }
+                        }}>{order.customerName}</td>
+                        <td className="px-6 py-4 text-sm text-gray-600 truncate max-w-[150px]">{order.product || '-'}</td>
+                        <td className="px-6 py-4 text-sm font-bold text-gray-800">{order.amount}</td>
+                        <td className="px-6 py-4 text-sm text-gray-600">{order.date}</td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${order.color}`}>
+                            {order.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const StatsView = () => {
+        // 根据真实客户数据计算漏斗
+        const stages = ['未联系', '初步沟通', '已报价', '样品阶段', '已成交'];
+        const funnelData = stages.map(stage => ({
+          stage,
+          count: customers.filter(c => c.stage === stage).length
+        }));
+        const maxFunnelCount = Math.max(...funnelData.map(d => d.count), 1);
+
+        // 计算客户等级分布
+        const levelCounts = {
+          'A(核心)': customers.filter(c => c.level === 'A(核心)').length,
+          'B(重点)': customers.filter(c => c.level === 'B(重点)').length,
+          'C(普通)': customers.filter(c => c.level === 'C(普通)').length,
+          'D(潜在)': customers.filter(c => c.level === 'D(潜在)').length,
+        };
+
+        // 计算沟通活跃度
+        const commStats = {
+          'WhatsApp': timeline.filter(t => t.type === 'whatsapp').length,
+          '邮件': timeline.filter(t => t.type === 'mail').length,
+          '电话/视频': timeline.filter(t => t.type === 'phone').length,
+          '面谈': timeline.filter(t => t.type === 'meeting').length,
+        };
+
+        return (
+          <div className="p-6 h-full overflow-y-auto max-w-7xl mx-auto">
+            <h1 className="text-2xl font-bold text-gray-800 mb-6">数据看板</h1>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              {/* 销售漏斗 */}
+              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                <h3 className="font-bold text-gray-800 mb-6 border-b border-gray-100 pb-3 flex items-center gap-2">
+                  <BarChart2 className="w-5 h-5 text-blue-600" /> 客户转化漏斗 (动态)
+                </h3>
+                <div className="space-y-4">
+                  {funnelData.map(item => (
+                    <div key={item.stage} className="flex items-center gap-4">
+                      <span className="w-20 text-sm font-medium text-gray-600 text-right">{item.stage}</span>
+                      <div className="flex-1 bg-gray-100 rounded-r-full h-8 flex items-center">
+                        <div
+                          className="bg-gradient-to-r from-blue-500 to-blue-400 h-full rounded-r-full flex items-center px-4 text-xs text-white font-bold transition-all duration-1000 ease-out"
+                          style={{ width: `${maxFunnelCount === 0 ? 0 : Math.max((item.count / maxFunnelCount) * 100, 8)}%` }}
+                        >
+                          {item.count > 0 ? item.count : ''}
+                        </div>
+                      </div>
+                      <span className="w-8 text-sm font-black text-gray-700">{item.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                {/* 客户等级矩阵 */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <h3 className="font-bold text-gray-800 mb-4 border-b border-gray-100 pb-3 flex items-center gap-2">
+                    <Users className="w-5 h-5 text-purple-600" /> 客户等级分布
+                  </h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    {Object.entries(levelCounts).map(([level, count], idx) => (
+                      <div key={level} className={`p-4 rounded-lg border ${idx === 0 ? 'bg-red-50 border-red-100' : idx === 1 ? 'bg-orange-50 border-orange-100' : idx === 2 ? 'bg-blue-50 border-blue-100' : 'bg-gray-50 border-gray-200'}`}>
+                        <div className="text-xs font-bold text-gray-500 mb-1">{level}</div>
+                        <div className={`text-2xl font-black ${idx === 0 ? 'text-red-600' : idx === 1 ? 'text-orange-600' : idx === 2 ? 'text-blue-600' : 'text-gray-600'}`}>{count}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 沟通方式偏好 */}
+                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <h3 className="font-bold text-gray-800 mb-4 border-b border-gray-100 pb-3 flex items-center gap-2">
+                    <MessageCircle className="w-5 h-5 text-green-600" /> 团队跟进动作统计
+                  </h3>
+                  <div className="flex justify-around items-end h-32 pt-4">
+                    {Object.entries(commStats).map(([type, count]) => (
+                      <div key={type} className="flex flex-col items-center gap-2 w-1/4">
+                        <span className="text-xs font-bold text-gray-500">{count}次</span>
+                        <div className="w-12 bg-green-100 rounded-t-md relative overflow-hidden flex flex-col justify-end h-24">
+                          <div
+                            className="w-full bg-green-500 transition-all duration-1000 ease-out"
+                            style={{ height: `${Math.max(...Object.values(commStats)) === 0 ? 0 : (count / Math.max(...Object.values(commStats))) * 100}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-xs font-medium text-gray-600">{type}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const CustomerDetailView = ({ customer }) => {
+        // 获取该客户对应的真实跟进记录
+        const customerTimeline = timeline.filter(t => t.customerId === customer.id);
+
+        // 获取该客户的真实联系人数据
+        const customerContacts = contacts.filter(c => c.customerId === customer.id);
+
+        return (
+          <div className="h-full flex flex-col bg-gray-50">
+            {/* Detail Header */}
+            <div className="bg-white px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0 shadow-sm z-10">
+              <div className="flex items-center gap-4">
+                <button onClick={() => setSelectedCustomer(null)} className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    {customer.name}
+                    {customer.country && <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-normal">{customer.country}</span>}
+                  </h2>
+                  <div className="flex gap-4 mt-1 text-sm text-gray-500">
+                    <span className="flex items-center gap-1">阶段: <StatusBadge stage={customer.stage} /></span>
+                    <span>负责人: {customer.owner}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { setEditingQuote(null); setIsAddQuoteModalOpen(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center gap-2 shadow-sm transition-colors">
+                  <Plus className="w-4 h-4" /> 录入报价单
+                </button>
+              </div>
+            </div>
+
+            {/* Detail Body */}
+            <div className="flex-1 overflow-auto p-6">
+              <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                {/* Left Column: Info & Contacts */}
+                <div className="space-y-6">
+                  {/* Info Card */}
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+                    <h3 className="font-bold text-gray-800 mb-4 flex justify-between items-center">
+                      基础信息
+                    </h3>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex justify-between"><span className="text-gray-500">客户等级</span><span className="font-bold text-gray-800">{customer.level}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">客户来源</span><span className="font-medium text-gray-800">{customer.source || '-'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">企业官网</span><span className="text-blue-600 hover:underline cursor-pointer truncate max-w-[150px] text-right" title={customer.website}>{customer.website || '-'}</span></div>
+
+                      <div className="flex justify-between items-start">
+                        <span className="text-gray-500 mt-0.5">社媒/备注</span>
+                        <div className="flex flex-col items-end gap-1.5">
+                          {customer.socialMedia && customer.socialMedia.length > 0 ? (
+                            customer.socialMedia.map((s, idx) => (
+                              <div key={idx} className="font-medium text-gray-800 flex items-center gap-1.5" title={s.account}>
+                                <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded border border-gray-200">{s.platform}</span>
+                                <span className="truncate max-w-[120px]">{s.account}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <span className="font-medium text-gray-800">-</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Contacts Card */}
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+                    <h3 className="font-bold text-gray-800 mb-4 flex justify-between items-center">
+                      联系人
+                      <button onClick={() => setIsAddContactModalOpen(true)} className="text-blue-600 hover:bg-blue-50 p-1 rounded transition-colors"><Plus className="w-4 h-4" /></button>
+                    </h3>
+                    <div className="space-y-4">
+                      {customerContacts.length === 0 ? (
+                        <div className="text-sm text-gray-500 text-center py-4 border border-dashed border-gray-200 rounded-lg">暂无联系人</div>
+                      ) : customerContacts.map(contact => (
+                        <div key={contact.id} className="p-3 border border-gray-100 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <div className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                                {contact.name}
+                                {contact.isPrimary && <span className="bg-green-100 text-green-700 text-[10px] px-1.5 py-0.5 rounded font-medium border border-green-200">首要</span>}
+                              </div>
+                              <div className="text-xs text-gray-500">{contact.title || '-'}</div>
+                            </div>
+                            <div className="flex gap-1 text-gray-400">
+                              <button className="p-1.5 hover:text-blue-600 hover:bg-blue-50 rounded" title={contact.email}><Mail className="w-4 h-4" /></button>
+                              <button className="p-1.5 hover:text-green-600 hover:bg-green-50 rounded" title={contact.phone}><MessageCircle className="w-4 h-4" /></button>
+                            </div>
+                          </div>
+                          <div className="text-xs text-gray-600 space-y-1">
+                            <div>{contact.email || '-'}</div>
+                            <div>{contact.phone || '-'}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Timeline & Interactions */}
+                <div className="lg:col-span-2 space-y-6">
+
+                  {/* Add Record Box */}
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+                    <div className="flex gap-4 border-b border-gray-100 pb-3 mb-4">
+                      <button className="text-blue-600 font-bold text-sm border-b-2 border-blue-600 pb-3 -mb-3.5">写跟进</button>
+                    </div>
+                    <form onSubmit={(e) => handleAddTimeline(e, customer.id)}>
+                      <textarea
+                        name="content"
+                        required
+                        className="w-full border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none min-h-[100px] resize-none"
+                        placeholder="记录本次沟通细节（将自动同步至跟进时间轴）..."
+                      ></textarea>
+                      <div className="flex justify-between items-center mt-3">
+                        <div className="flex gap-3 items-center flex-wrap">
+                          <select name="type" className="text-sm border border-gray-200 rounded-md px-2 py-1.5 text-gray-600 focus:outline-none bg-gray-50 cursor-pointer">
+                            <option value="whatsapp">💬 WhatsApp</option>
+                            <option value="mail">📧 邮件</option>
+                            <option value="phone">📞 电话</option>
+                            <option value="meeting">🤝 面谈</option>
+                          </select>
+                          <select name="stage" defaultValue={customer.stage} className="text-sm border border-gray-200 rounded-md px-2 py-1.5 text-gray-600 focus:outline-none bg-gray-50 cursor-pointer">
+                            <option value="未联系">阶段: 未联系</option>
+                            <option value="初步沟通">阶段: 初步沟通</option>
+                            <option value="已报价">阶段: 已报价</option>
+                            <option value="样品阶段">阶段: 样品阶段</option>
+                            <option value="已成交">阶段: 已成交</option>
+                            <option value="已流失">阶段: 已流失</option>
+                          </select>
+                          <div className="flex items-center gap-2 text-sm text-gray-600 font-medium">
+                            下次提醒: <input name="nextFollowUp" type="date" defaultValue={customer.nextFollowUp || ''} className="border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer" />
+                          </div>
+                        </div>
+                        <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm text-sm font-bold shrink-0 transition-colors">
+                          发布跟进
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* Timeline */}
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+                    <h3 className="font-bold text-gray-800 mb-6">跟进时间轴</h3>
+                    <div className="relative border-l-2 border-gray-100 ml-3 space-y-6">
+                      {customerTimeline.length === 0 ? (
+                        <div className="pl-6 text-sm text-gray-500">暂无跟进记录，快去发布第一条吧。</div>
+                      ) : customerTimeline.map(item => (
+                        <div key={item.id} className="pl-6 relative">
+                          {/* Timeline Dot */}
+                          <div className="absolute w-7 h-7 bg-white rounded-full border-2 border-gray-100 flex items-center justify-center -left-[15px] top-0 shadow-sm">
+                            {item.type === 'mail' ? <Mail className="w-3.5 h-3.5 text-blue-600" /> :
+                            item.type === 'whatsapp' ? <MessageCircle className="w-3.5 h-3.5 text-green-600" /> :
+                            item.type === 'phone' ? <Phone className="w-3.5 h-3.5 text-orange-600" /> :
+                            item.type === 'system' ? <Briefcase className="w-3.5 h-3.5 text-indigo-600" /> :
+                            <Users className="w-3.5 h-3.5 text-purple-600" />}
+                          </div>
+                          {/* Content */}
+                          <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 shadow-sm">
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="font-bold text-gray-800 text-sm">{item.title}</span>
+                              <span className="text-xs text-gray-400 font-medium">{new Date(item.date).toLocaleString()}</span>
+                            </div>
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{item.content}</p>
+                            <div className="mt-3 text-xs text-gray-400 flex items-center gap-1 font-medium">
+                              记录人: {item.user}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      if (loading && !user) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-gray-500 font-medium">系统启动中...</p>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="flex h-screen bg-gray-100 font-sans text-gray-800">
+          <Toast />
+          <AddCustomerModal />
+          <AddContactModal />
+          <AddQuoteModal />
+
+          {/* Sidebar */}
+          <div className="w-64 bg-white border-r border-gray-200 flex flex-col shrink-0 z-20 shadow-[2px_0_8px_-4px_rgba(0,0,0,0.1)]">
+            <div className="p-5 flex items-center gap-3 border-b border-gray-100">
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg flex items-center justify-center shadow-inner">
+                <Globe className="w-5 h-5 text-white" />
+              </div>
+              <span className="font-black text-xl text-gray-800 tracking-tight">GlobalTrade</span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 px-3">
+              <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-4 mt-2">核心业务</div>
+              <SidebarItem icon={LayoutDashboard} label="工作台" id="dashboard" />
+              <SidebarItem icon={Users} label="我的客户" id="customers" badge={stats.overdue > 0 ? stats.overdue : null} />
+
+              <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mt-6 mb-2 px-4">业务追踪</div>
+              <SidebarItem icon={Briefcase} label="报价与订单" id="quotes" />
+
+              <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mt-6 mb-2 px-4">其他</div>
+              <SidebarItem icon={BarChart2} label="数据看板" id="stats" />
+            </div>
+
+            <div className="p-4 border-t border-gray-100">
+              <div className="flex items-center px-4 py-3 text-gray-500 hover:bg-gray-50 rounded-lg cursor-not-allowed">
+                <Settings className="w-5 h-5 mr-3" />
+                <span className="flex-1 font-medium text-sm">系统设置</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Content Area */}
+          <div className="flex-1 flex flex-col overflow-hidden relative">
+            {/* Top Header */}
+            <header className="bg-white h-16 border-b border-gray-200 flex items-center justify-between px-6 shrink-0 z-10 shadow-sm">
+              <div className="flex-1"></div>
+              <div className="flex items-center gap-5">
+                <button className="text-gray-400 hover:text-blue-600 transition-colors relative">
+                  <Bell className="w-5 h-5" />
+                  {stats.overdue > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>}
+                </button>
+                <div className="w-px h-6 bg-gray-200"></div>
+                <div className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-lg transition-colors">
+                  <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-sm border border-blue-200">
+                    A
+                  </div>
+                  <span className="text-sm font-bold text-gray-700">Admin</span>
+                </div>
+              </div>
+            </header>
+
+            {/* Dynamic Content Routing */}
+            <main className="flex-1 overflow-hidden relative">
+              {selectedCustomer ? (
+                <CustomerDetailView customer={selectedCustomer} />
+              ) : activeMenu === 'dashboard' ? (
+                <DashboardView />
+              ) : activeMenu === 'customers' ? (
+                <CustomerListView />
+              ) : activeMenu === 'quotes' ? (
+                <QuotesOrdersView />
+              ) : activeMenu === 'stats' ? (
+                <StatsView />
+              ) : (
+                <div className="flex h-full items-center justify-center flex-col text-gray-400 p-8 text-center bg-gray-50">
+                  <LayoutDashboard className="w-16 h-16 mb-4 text-gray-300" />
+                  <p className="text-lg font-bold text-gray-600 mb-2">此模块 ({activeMenu}) 在 MVP 原型中暂未开放</p>
+                  <p className="text-sm">请点击左侧<span className="font-bold text-gray-700">“工作台”</span>或<span className="font-bold text-gray-700">“我的客户”</span>体验完整的数据闭环</p>
+                </div>
+              )}
+            </main>
+          </div>
+        </div>
+      );
+    }
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<GlobalTradeCRM />);
+  </script>
+</body>
+</html>
