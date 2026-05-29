@@ -108,16 +108,10 @@ const GlobalTradeCRM = () => {
         customerId={quoteModalArgs?.customer?.id}
         customerName={quoteModalArgs?.customer?.name}
         onSave={(q) => {
-          const prefix =
-            q.type === "报价单" ? "QUO" : q.type === "订单" ? "ORD" : "SMP";
-          let displayId = q.id
-            ? q.displayId
-            : `${prefix}-${Date.now().toString().slice(-6)}`;
-
           if (q.id) {
             actions.updateOrder(q.id, q);
           } else {
-            actions.addOrder({ ...q, displayId });
+            actions.addOrder({ ...q });
           }
 
           // Sync to timeline
@@ -126,11 +120,13 @@ const GlobalTradeCRM = () => {
             type: "system",
             date: new Date().toISOString(),
             title: q.id
-              ? `修改${q.type}: ${displayId}`
-              : `录入${q.type}: ${displayId}`,
-            content: `总金额: ${q.currency} ${q.amount}
+              ? `修改${q.type}: ${q.displayId}`
+              : `录入${q.type}: ${q.displayId}`,
+            content: `总金额: ${q.currency} ${q.amount} ${q.hasExtraFee ? "(含附加费: " + q.extraFee + ")" : ""}
 状态: ${q.status}
-关联产品: ${q.product || "无"}`,
+关联产品: ${q.products || "无"}
+${q.notes ? "备注: " + q.notes : ""}`,
+            attachments: q.attachments || [],
             user: "Admin",
           });
 
