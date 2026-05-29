@@ -41,6 +41,14 @@ const CustomerDetailView = ({
   const cContacts = data.contacts.filter((c) => c.customerId === customer.id);
   const dormant = isDormant(customer, data.timeline);
 
+  const getTimelineTitle = (type) => {
+    if (type === "whatsapp") return "WhatsApp 沟通";
+    if (type === "mail") return "邮件沟通";
+    if (type === "phone") return "电话沟通";
+    if (type === "meeting") return "面谈沟通";
+    return "日常跟进";
+  };
+
   const handleSubmitTimeline = (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
@@ -51,7 +59,7 @@ const CustomerDetailView = ({
       customerId: customer.id,
       type: formData.get("type"),
       date: new Date().toISOString(),
-      title: "日常跟进",
+      title: getTimelineTitle(formData.get("type")),
       content: formData.get("content"),
       user: "Admin",
     });
